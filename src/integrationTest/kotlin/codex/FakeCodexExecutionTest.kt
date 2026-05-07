@@ -40,7 +40,6 @@ class FakeCodexExecutionTest {
         server = McpServerProcess(
             jarPath = jarPath,
             fakeCodexPath = fakeCodexPath,
-            allowedRoot = tempDir.toFile().canonicalPath,
             extraEnv = mapOf("FAKE_CODEX_MODE" to mode) + extraEnv,
         )
         server.start()
@@ -83,8 +82,8 @@ class FakeCodexExecutionTest {
             "CODEX_MCP_ENV_PASSTHROUGH_ALLOWLIST" to "PATH,HOME",
         ))
         val result = callAndParse("echo env")
-        // CODEX_MCP_ALLOWED_ROOTS and other MCP server vars must NOT appear in subprocess env
-        assertFalse(result.stdout.contains("CODEX_MCP_ALLOWED_ROOTS"),
+        // CODEX_MCP_TIMEOUT_MS and other MCP server vars must NOT appear in subprocess env
+        assertFalse(result.stdout.contains("CODEX_MCP_TIMEOUT_MS"),
             "Server-internal env vars must not leak to subprocess")
         // PATH should be present
         assertTrue(result.stdout.contains("PATH="), "PATH should be forwarded")

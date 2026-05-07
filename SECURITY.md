@@ -10,29 +10,25 @@ user's local machine. The primary threats are:
 
 1. **Prompt injection** — a malicious document or tool result that causes Claude to issue
    a Codex call designed to exfiltrate secrets or escape the sandbox.
-2. **Path traversal** — a `cwd` argument that points outside the intended project root.
-3. **Secret leakage** — API keys or tokens appearing in Codex stdout/stderr that are
+2. **Secret leakage** — API keys or tokens appearing in Codex stdout/stderr that are
    then returned to the caller.
-4. **Over-privileged subprocess** — Codex inheriting a full environment that includes
+3. **Over-privileged subprocess** — Codex inheriting a full environment that includes
    credentials it doesn't need.
-5. **Resource exhaustion** — unbounded output or an infinite-running subprocess.
+4. **Resource exhaustion** — unbounded output or an infinite-running subprocess.
 
 ## Security controls
 
-### 1. Path policy (`security/PathPolicy.kt`)
+### 1. Working directory validation (`security/SecurityPolicy.kt`)
 
 - `cwd` is canonicalized and must exist as a directory.
-- It must be inside at least one configured allowed root (`CODEX_MCP_ALLOWED_ROOTS`).
-- Absolute denials (regardless of allowed roots): `/`, the user's home directory, `.ssh`,
-  `.gnupg`, system directories (`/etc`, `/bin`, `/sbin`, `/usr`, `/var`, `/proc`, `/sys`),
-  and `/tmp`.
+- No allowed-root restriction is enforced — `cwd` only sets the subprocess starting directory,
+  not what paths Codex may read. OS user permissions govern actual file access.
 
 ### 2. Prompt heuristics (`security/InputValidator.kt`)
 
 Defense-in-depth regex patterns reject prompts that contain obvious exfiltration intent:
-`cat ~/.ssh/...`, `cat /home/.../.ssh/...`, `cat *.gnupg*`, `print env`, `dump secrets`,
-`exfiltrate`, `curl|sh`, `wget|bash`, and similar. This is not a complete security system —
-the sandbox and path policy are the primary controls.
+`cat *.ssh*`, `cat *.gnupg*`, `print env`, `dump secrets`, `exfiltrate`, `curl|sh`,
+`wget|bash`, and similar. The environment allowlist and output redactor are the primary controls.
 
 ### 3. Environment allowlist (`security/EnvironmentPolicy.kt`)
 
@@ -58,7 +54,7 @@ secret is never silently cut in half.
 | Mode | Description |
 |---|---|
 | `read-only` (default) | Codex may not write files |
-| `workspace-write` | Codex may write inside the allowed root |
+| `workspace-write` | Codex may write files |
 | `danger-full-access` | All restrictions removed — **requires** `CODEX_MCP_ALLOW_DANGER_FULL_ACCESS=true` |
 
 ### 6. Output bounding (`security/OutputRedactor.kt`)
@@ -84,8 +80,7 @@ Shell metacharacters in the prompt have no effect.
 Every approved invocation and every security rejection produces a structured `AUDIT` line on
 stderr (or a configured file). The line contains:
 - A SHA-256 hex prefix of the prompt (16 chars) and its length — **never the raw prompt**.
-- The resolved sandbox mode, approval mode, phase, and taskId.
-- The set of environment variable *keys* (never values) that were forwarded.
+- The resolved sandbox mode, taskId, and timing fields.
 
 ### 10. Prompt length limit
 
@@ -95,7 +90,7 @@ subprocess is spawned.
 ## What this server does NOT protect against
 
 - A Codex version that ignores the `--sandbox` flag.
-- A compromised or malicious `codex` binary at `CODEX_PATH`.
+- A compromised or malicious `codex` binary on `PATH`.
 - Side-channel attacks via timing or process metadata.
 - Attacks that require physical access to the machine.
 

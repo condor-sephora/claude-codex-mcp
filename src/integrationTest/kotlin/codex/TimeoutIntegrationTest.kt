@@ -42,13 +42,9 @@ class TimeoutIntegrationTest {
         server = McpServerProcess(
             jarPath = jarPath,
             fakeCodexPath = fakeCodexPath,
-            allowedRoot = tempDir.toFile().canonicalPath,
             extraEnv = mapOf(
                 "FAKE_CODEX_MODE" to "timeout",
-                // Set a short timeout so the test doesn't take 300 seconds
-                "CODEX_MCP_DEFAULT_TIMEOUT_MS" to "2000",
-                "CODEX_MCP_MIN_TIMEOUT_MS" to "500",
-                "CODEX_MCP_MAX_TIMEOUT_MS" to "30000",
+                "CODEX_MCP_TIMEOUT_MS" to "2000",
             ),
         )
         server.start()

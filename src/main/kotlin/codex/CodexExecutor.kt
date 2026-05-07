@@ -12,22 +12,14 @@ import java.util.concurrent.TimeUnit
  * Executes the Codex CLI subprocess safely.
  *
  * Security guarantees:
- *   - Uses [ProcessBuilder] with an explicit argument list — NO shell execution.
- *   - Environment is filtered through [EnvironmentPolicy.buildEnv] before spawning.
+ *   - Uses ProcessBuilder with an explicit argument list — NO shell execution.
+ *   - Environment is filtered through EnvironmentPolicy.buildEnv before spawning.
  *   - Stdout/stderr are read concurrently in background threads to prevent pipe deadlock.
  *   - Process is killed (then force-killed) when the configured timeout elapses.
- *   - All output is bounded to [AppConfig.maxOutputChars] and redacted by [OutputRedactor].
- *
- * This class is intentionally a thin execution layer. All security decisions are made
- * before reaching this class (by [security.SecurityPolicy]).
+ *   - All output is bounded to AppConfig.maxOutputChars and redacted by OutputRedactor.
  */
 object CodexExecutor {
 
-    /**
-     * Executes Codex and returns a bounded, redacted [CodexResult].
-     *
-     * This function blocks the calling thread (use from a background dispatcher).
-     */
     fun execute(request: CodexExecutionRequest, config: AppConfig): CodexResult {
         val command = CodexCommand.build(request, config)
         val env = EnvironmentPolicy.buildEnv(config)
@@ -40,7 +32,6 @@ object CodexExecutor {
             ProcessBuilder(command)
                 .directory(workingDir)
                 .apply {
-                    // Replace the subprocess environment entirely — do NOT inherit parent env.
                     environment().clear()
                     environment().putAll(env)
                     // Redirect stdin to /dev/null so the subprocess never blocks waiting
@@ -58,10 +49,6 @@ object CodexExecutor {
             )
         }
 
-        // Read stdout and stderr concurrently in separate threads.
-        // Reading both streams simultaneously prevents the subprocess from blocking
-        // when the OS pipe buffer fills up (which would cause a deadlock if we read
-        // one stream to completion before the other).
         val stdoutFuture: CompletableFuture<String> = CompletableFuture.supplyAsync {
             readStream(process.inputStream)
         }
@@ -69,7 +56,6 @@ object CodexExecutor {
             readStream(process.errorStream)
         }
 
-        // Wait for the process with a timeout.
         val finished = try {
             process.waitFor(request.timeoutMs, TimeUnit.MILLISECONDS)
         } catch (e: InterruptedException) {
@@ -79,9 +65,7 @@ object CodexExecutor {
 
         val timedOut = !finished
         if (timedOut) {
-            // Graceful termination first.
             process.destroy()
-            // Give the process up to 3 seconds to exit cleanly.
             val exitedGracefully = try {
                 process.waitFor(3, TimeUnit.SECONDS)
             } catch (_: InterruptedException) {
@@ -89,25 +73,14 @@ object CodexExecutor {
                 false
             }
             if (!exitedGracefully) {
-                // Force kill — this always succeeds on POSIX and Windows.
                 process.destroyForcibly()
             }
         }
 
         val durationMs = System.currentTimeMillis() - startMs
 
-        // Collect output now that the process has exited (or been killed).
-        // These futures complete quickly because the subprocess streams are closed.
-        val rawStdout = try {
-            stdoutFuture.get(10, TimeUnit.SECONDS)
-        } catch (_: Exception) {
-            ""
-        }
-        val rawStderr = try {
-            stderrFuture.get(10, TimeUnit.SECONDS)
-        } catch (_: Exception) {
-            ""
-        }
+        val rawStdout = try { stdoutFuture.get(10, TimeUnit.SECONDS) } catch (_: Exception) { "" }
+        val rawStderr = try { stderrFuture.get(10, TimeUnit.SECONDS) } catch (_: Exception) { "" }
 
         val (stdout, stdoutTruncated) = OutputRedactor.boundAndRedact(rawStdout, config.maxOutputChars)
         val (stderr, stderrTruncated) = OutputRedactor.boundAndRedact(rawStderr, config.maxOutputChars)
@@ -129,16 +102,9 @@ object CodexExecutor {
             commandPreview = commandPreview,
             workingDirectory = request.cwd,
             sandbox = request.sandbox.value,
-            approvalModeApplied = request.approvalMode.value,
-            approvalModeWarning = codex.ApprovalMode.UNSUPPORTED_WARNING,
             taskId = request.taskId,
-            phase = request.phase?.value,
-            metadata = request.metadata,
-            securityWarnings = emptyList(),
         )
     }
-
-    // ---------- Helpers ----------
 
     private fun readStream(stream: java.io.InputStream): String = try {
         stream.bufferedReader(Charsets.UTF_8).use { it.readText() }
@@ -146,7 +112,6 @@ object CodexExecutor {
         ""
     }
 
-    /** Constructs a result representing a startup failure before the process ran. */
     private fun errorResult(
         message: String,
         commandPreview: String,
@@ -163,11 +128,6 @@ object CodexExecutor {
         commandPreview = commandPreview,
         workingDirectory = request.cwd,
         sandbox = request.sandbox.value,
-        approvalModeApplied = request.approvalMode.value,
-        approvalModeWarning = codex.ApprovalMode.UNSUPPORTED_WARNING,
         taskId = request.taskId,
-        phase = request.phase?.value,
-        metadata = request.metadata,
-        securityWarnings = listOf(message),
     )
 }

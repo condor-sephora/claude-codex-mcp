@@ -36,7 +36,6 @@ class OutputBoundingIntegrationTest {
         server = McpServerProcess(
             jarPath = jarPath,
             fakeCodexPath = fakeCodexPath,
-            allowedRoot = tempDir.toFile().canonicalPath,
             extraEnv = mapOf(
                 "FAKE_CODEX_MODE" to mode,
                 "CODEX_MCP_MAX_OUTPUT_CHARS" to maxOutput.toString(),

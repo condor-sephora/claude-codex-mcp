@@ -41,10 +41,7 @@ Set the `FAKE_CODEX_MODE` environment variable to control the behavior:
 The `makeTestFixturesExecutable` Gradle task runs automatically before integration tests
 and marks `fake-codex.sh` as executable (`chmod +x`).
 
-Set the `CODEX_PATH` environment variable to point to the appropriate script:
-
-```
-CODEX_PATH=/path/to/test-fixtures/fake-codex/fake-codex.sh
-```
-
-Integration tests configure this automatically via the `fake.codex.path` system property.
+Integration tests inject the fake binary via the `fake.codex.path` system property.
+`McpServerProcess` creates a temp directory containing a `codex` symlink pointing to
+`fake-codex.sh` and prepends it to `PATH`, so the server resolves it through normal
+PATH lookup — no special env var needed.

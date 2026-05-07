@@ -4,7 +4,6 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -16,12 +15,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Path
 
-/**
- * Integration tests for the execute_codex tool.
- *
- * Tests verify security enforcement, result shape, and metadata correctness
- * using fake-codex.sh as the Codex executable.
- */
 class ExecuteCodexIntegrationTest {
 
     @TempDir
@@ -41,29 +34,29 @@ class ExecuteCodexIntegrationTest {
         server = McpServerProcess(
             jarPath = jarPath,
             fakeCodexPath = fakeCodexPath,
-            allowedRoot = tempDir.toFile().canonicalPath,
             extraEnv = extraEnv,
         )
         server.start()
         server.client.initialize()
     }
 
+    @BeforeEach
+    fun noop() {}
+
     @AfterEach
     fun tearDown() {
         server.close()
     }
 
-    private fun callTool(args: Map<String, Any?>, fakeMode: String = "success"): CodexResultShape {
+    private fun callTool(args: Map<String, Any?>): CodexResultShape {
         val argsJson = buildJsonObject {
             for ((k, v) in args) when {
                 v is String -> put(k, v)
                 v is Long -> put(k, v)
                 v is Int -> put(k, v.toLong())
-                else -> {}  // skip
+                else -> {}
             }
         }
-        // Fake mode is injected via extra env on the server process; not possible to change
-        // per-call. Tests use separate server instances for different modes.
         val response = server.client.callTool("execute_codex", argsJson)
         val contentText = response["result"]!!
             .jsonObject["content"]!!
@@ -74,9 +67,6 @@ class ExecuteCodexIntegrationTest {
     }
 
     // ---------- Successful execution ----------
-
-    @BeforeEach
-    fun noop() {}  // Ensure @BeforeEach is present for test ordering
 
     @Test
     fun `valid read-only execution returns successful structured result`() {
@@ -90,26 +80,21 @@ class ExecuteCodexIntegrationTest {
         assertFalse(result.timedOut)
         assertEquals("read-only", result.sandbox)
         assertNotNull(result.stdout)
-        assertNotNull(result.approvalModeWarning)
         assertTrue(result.durationMs >= 0)
     }
 
     @Test
-    fun `result includes all expected metadata fields`() {
+    fun `taskId is echoed in result`() {
         startServer(mapOf("FAKE_CODEX_MODE" to "success"))
         val result = callTool(mapOf(
             "prompt" to "analyze the codebase",
             "cwd" to tempDir.toFile().canonicalPath,
             "taskId" to "SHP-99999",
-            "phase" to "analysis",
         ))
 
         assertEquals("SHP-99999", result.taskId)
-        assertEquals("analysis", result.phase)
         assertNotNull(result.workingDirectory)
         assertNotNull(result.commandPreview)
-        assertNotNull(result.approvalModeApplied)
-        assertNotNull(result.approvalModeWarning)
     }
 
     @Test
@@ -119,7 +104,6 @@ class ExecuteCodexIntegrationTest {
             "prompt" to "cause an error",
             "cwd" to tempDir.toFile().canonicalPath,
         ))
-
         assertNotEquals(0, result.exitCode)
     }
 
@@ -130,7 +114,6 @@ class ExecuteCodexIntegrationTest {
             "prompt" to "produce stderr",
             "cwd" to tempDir.toFile().canonicalPath,
         ))
-
         assertTrue(result.stderr.isNotBlank(), "stderr should be captured")
     }
 
@@ -164,17 +147,6 @@ class ExecuteCodexIntegrationTest {
     }
 
     @Test
-    fun `invalid cwd (outside allowed root) returns safe error`() {
-        startServer()
-        val response = server.client.callTool("execute_codex", buildJsonObject {
-            put("prompt", "analyze code")
-            put("cwd", "/tmp")  // /tmp is not the allowed root
-        })
-        val isError = response["result"]?.jsonObject?.get("isError")?.jsonPrimitive?.boolean
-        assertTrue(isError == true, "Path outside allowed root should be rejected")
-    }
-
-    @Test
     fun `dangerous prompt is rejected`() {
         startServer()
         val response = server.client.callTool("execute_codex", buildJsonObject {
@@ -197,7 +169,6 @@ class ExecuteCodexIntegrationTest {
     }
 }
 
-/** Deserialization shape matching [codex.CodexResult] for integration test assertions. */
 @kotlinx.serialization.Serializable
 data class CodexResultShape(
     val exitCode: Int = -1,
@@ -210,10 +181,5 @@ data class CodexResultShape(
     val commandPreview: String = "",
     val workingDirectory: String = "",
     val sandbox: String = "",
-    val approvalModeApplied: String = "",
-    val approvalModeWarning: String? = null,
     val taskId: String? = null,
-    val phase: String? = null,
-    val metadata: Map<String, String>? = null,
-    val securityWarnings: List<String> = emptyList(),
 )

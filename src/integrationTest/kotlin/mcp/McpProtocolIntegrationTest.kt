@@ -44,7 +44,6 @@ class McpProtocolIntegrationTest {
         server = McpServerProcess(
             jarPath = jarPath,
             fakeCodexPath = fakeCodexPath,
-            allowedRoot = tempDir.toFile().canonicalPath,
         )
         server.start()
     }

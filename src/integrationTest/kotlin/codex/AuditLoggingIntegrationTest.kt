@@ -12,11 +12,12 @@ import java.nio.file.Path
 /**
  * Integration tests for the audit logger.
  *
+ * Each audit line is "AUDIT <json-object>" — one line per event.
  * Verifies that:
  *   - Audit log entries appear on stderr (captured from server stderr).
  *   - Raw prompt text does NOT appear in the audit log.
- *   - Prompt hash and length ARE logged.
- *   - Rejection events are logged.
+ *   - Prompt hash, length, outcome, and sessionId ARE logged.
+ *   - Rejection events are logged with a rejectionCategory.
  */
 class AuditLoggingIntegrationTest {
 
@@ -36,7 +37,6 @@ class AuditLoggingIntegrationTest {
         server = McpServerProcess(
             jarPath = jarPath,
             fakeCodexPath = fakeCodexPath,
-            allowedRoot = tempDir.toFile().canonicalPath,
             extraEnv = mapOf("FAKE_CODEX_MODE" to "success"),
         )
         server.start()
@@ -49,18 +49,20 @@ class AuditLoggingIntegrationTest {
             put("taskId", "AUDIT-TEST-001")
         })
 
-        // Wait for audit log to be written
         Thread.sleep(500)
         val stderr = server.getStderr()
 
         val auditLines = stderr.filter { it.startsWith("AUDIT") }
         assertTrue(auditLines.isNotEmpty(), "At least one AUDIT line expected.\nAll stderr:\n${stderr.joinToString("\n")}")
 
-        val auditLine = auditLines.first { it.contains("event=codex_invocation") }
+        val auditLine = auditLines.first { it.contains("\"event\":\"codex_invocation\"") }
 
-        // Must contain prompt hash and length
-        assertTrue(auditLine.contains("promptHash="), "Audit line must contain promptHash")
-        assertTrue(auditLine.contains("promptLength="), "Audit line must contain promptLength")
+        // Must contain outcome, prompt hash, length, and sessionId
+        assertTrue(auditLine.contains("\"outcome\":"), "Audit line must contain outcome")
+        assertTrue(auditLine.contains("\"promptHash\":"), "Audit line must contain promptHash")
+        assertTrue(auditLine.contains("\"promptLength\":"), "Audit line must contain promptLength")
+        assertTrue(auditLine.contains("\"sessionId\":"), "Audit line must contain sessionId")
+        assertTrue(auditLine.contains("\"stderrNonEmpty\":"), "Audit line must contain stderrNonEmpty")
 
         // Must NOT contain the raw prompt
         assertFalse(auditLine.contains(sensitivePrompt),
@@ -71,16 +73,62 @@ class AuditLoggingIntegrationTest {
     }
 
     @Test
-    fun `rejection events are logged with AUDIT prefix`() {
+    fun `successful invocation logs outcome=success`() {
         server = McpServerProcess(
             jarPath = jarPath,
             fakeCodexPath = fakeCodexPath,
-            allowedRoot = tempDir.toFile().canonicalPath,
+            extraEnv = mapOf("FAKE_CODEX_MODE" to "success"),
         )
         server.start()
         server.client.initialize()
 
-        // Call with empty prompt — should be rejected
+        server.client.callTool("execute_codex", buildJsonObject {
+            put("prompt", "run analysis")
+            put("cwd", tempDir.toFile().canonicalPath)
+        })
+
+        Thread.sleep(500)
+        val auditLine = server.getStderr()
+            .filter { it.startsWith("AUDIT") }
+            .first { it.contains("\"event\":\"codex_invocation\"") }
+
+        assertTrue(auditLine.contains("\"outcome\":\"success\""),
+            "Successful call should log outcome=success.\nAudit line: $auditLine")
+    }
+
+    @Test
+    fun `failed invocation logs outcome=codex_error`() {
+        server = McpServerProcess(
+            jarPath = jarPath,
+            fakeCodexPath = fakeCodexPath,
+            extraEnv = mapOf("FAKE_CODEX_MODE" to "error"),
+        )
+        server.start()
+        server.client.initialize()
+
+        server.client.callTool("execute_codex", buildJsonObject {
+            put("prompt", "cause an error")
+            put("cwd", tempDir.toFile().canonicalPath)
+        })
+
+        Thread.sleep(500)
+        val auditLine = server.getStderr()
+            .filter { it.startsWith("AUDIT") }
+            .first { it.contains("\"event\":\"codex_invocation\"") }
+
+        assertTrue(auditLine.contains("\"outcome\":\"codex_error\""),
+            "Failed call should log outcome=codex_error.\nAudit line: $auditLine")
+    }
+
+    @Test
+    fun `rejection events are logged with AUDIT prefix and rejectionCategory`() {
+        server = McpServerProcess(
+            jarPath = jarPath,
+            fakeCodexPath = fakeCodexPath,
+        )
+        server.start()
+        server.client.initialize()
+
         server.client.callTool("execute_codex", buildJsonObject {
             put("prompt", "")
             put("cwd", tempDir.toFile().canonicalPath)
@@ -88,10 +136,12 @@ class AuditLoggingIntegrationTest {
 
         Thread.sleep(500)
         val stderr = server.getStderr()
-        val rejectionLines = stderr.filter { it.contains("event=security_rejection") }
+        val rejectionLines = stderr.filter { it.contains("\"event\":\"security_rejection\"") }
 
         assertTrue(rejectionLines.isNotEmpty(),
             "Expected security_rejection audit event.\nAll stderr:\n${stderr.joinToString("\n")}")
+        assertTrue(rejectionLines.first().contains("\"rejectionCategory\":\"empty_prompt\""),
+            "Empty prompt rejection should be categorized as empty_prompt")
     }
 
     @Test
@@ -99,7 +149,6 @@ class AuditLoggingIntegrationTest {
         server = McpServerProcess(
             jarPath = jarPath,
             fakeCodexPath = fakeCodexPath,
-            allowedRoot = tempDir.toFile().canonicalPath,
             extraEnv = mapOf(
                 "FAKE_CODEX_MODE" to "success",
                 "OPENAI_API_KEY" to "sk-test-audit-should-not-appear",
@@ -114,8 +163,7 @@ class AuditLoggingIntegrationTest {
         })
 
         Thread.sleep(500)
-        val stderr = server.getStderr()
-        val allStderr = stderr.joinToString("\n")
+        val allStderr = server.getStderr().joinToString("\n")
 
         assertFalse(allStderr.contains("sk-test-audit-should-not-appear"),
             "API key value must not appear in any log output")
