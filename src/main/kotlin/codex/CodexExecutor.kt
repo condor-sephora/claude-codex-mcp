@@ -21,10 +21,10 @@ import java.util.concurrent.TimeUnit
 object CodexExecutor {
 
     fun execute(request: CodexExecutionRequest, config: AppConfig): CodexResult {
-        val command = CodexCommand.build(request, config)
+        val command = CodexCommand.build(request)
         val env = EnvironmentPolicy.buildEnv(config)
         val workingDir = File(request.cwd)
-        val commandPreview = CodexCommand.preview(request, config)
+        val commandPreview = CodexCommand.preview(request)
 
         val startMs = System.currentTimeMillis()
 

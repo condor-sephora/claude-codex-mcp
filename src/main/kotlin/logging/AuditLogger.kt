@@ -27,7 +27,7 @@ object AuditLogger {
     private var auditOut: PrintStream? = null
 
     // Groups all calls from the same server process — one session = one JAR lifetime.
-    val sessionId: String = UUID.randomUUID().toString().take(8)
+    private val sessionId: String = UUID.randomUUID().toString().take(8)
 
     fun init(auditLogPath: String?) {
         auditOut = if (auditLogPath != null) {

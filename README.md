@@ -5,7 +5,7 @@ written in Kotlin that exposes the OpenAI Codex CLI as a single, tightly-sandbox
 named `execute_codex`.
 
 Claude Code (or any MCP-compatible AI client) uses this server to delegate coding tasks to
-Codex — with path isolation, secret redaction, output bounding, and full audit logging built in.
+Codex — with environment isolation, secret redaction, output bounding, and full audit logging built in.
 
 ---
 
@@ -76,7 +76,22 @@ services mid-execution do not fit this architecture.
 
 ## Installation
 
-### 1. Clone and build
+### 1. Prerequisites
+
+Verify both dependencies are working before registering the server:
+
+```bash
+# Java 11 or later
+java -version
+
+# Codex CLI — must work from your terminal before it will work here
+codex exec "say hello"
+```
+
+If `codex exec` fails, fix Codex authentication first. This server cannot work around
+a broken Codex installation.
+
+### 2. Clone and build
 
 ```bash
 git clone <repo-url> claude-codex-mcp
@@ -90,36 +105,67 @@ The fat JAR (self-contained, no classpath setup needed) is produced at:
 build/libs/claude-codex-mcp-all.jar
 ```
 
-### 2. Register with Claude Code
+Note the **absolute path** to this JAR — you will need it in the next step.
 
-Run this **once**.
+### 3. Register with Claude Code
+
+Run this **once**. Use the absolute path to the JAR from step 2.
 
 ```bash
 claude mcp add codex \
-  -- java -jar /path/to/claude-codex-mcp/build/libs/claude-codex-mcp-all.jar
+  -- java -jar /absolute/path/to/claude-codex-mcp/build/libs/claude-codex-mcp-all.jar
 ```
 
-### 3. Verify registration
+**With optional configuration** — pass env vars via `--env` flags:
+
+```bash
+claude mcp add codex \
+  --env CODEX_MCP_TIMEOUT_MS=180000 \
+  --env CODEX_MCP_AUDIT_LOG_PATH=/Users/me/logs/codex-audit.log \
+  -- java -jar /absolute/path/to/claude-codex-mcp/build/libs/claude-codex-mcp-all.jar
+```
+
+**Scope** — by default `claude mcp add` registers the server for the current project
+(stored in `.claude/settings.json`). To register globally for all projects:
+
+```bash
+claude mcp add codex --scope global \
+  -- java -jar /absolute/path/to/claude-codex-mcp/build/libs/claude-codex-mcp-all.jar
+```
+
+### 4. Verify registration
 
 ```bash
 claude mcp list
 ```
 
-You should see `codex` with status `connected`. Claude Code will start the JAR
-automatically on the next session — no manual process management needed.
+You should see `codex` listed. Claude Code will start the JAR automatically at session
+start — no manual process management needed.
 
-### 4. Confirm it works
+### 5. Confirm it works
 
 Open a new Claude Code session and ask:
 
 ```
-Use execute_codex to list the Kotlin files in <your-project-dir> and summarize the package structure.
+Use execute_codex to list the files in <your-project-dir> and summarize the structure.
 ```
 
-Or invoke the tool directly:
+Or invoke the tool directly from the Claude Code prompt:
 
 ```
 /mcp codex execute_codex '{"prompt":"what files are in this project?","cwd":"/path/to/project","sandbox":"read-only"}'
+```
+
+### 6. Updating after a rebuild
+
+If you rebuild the JAR (`./gradlew build`), no re-registration is needed — Claude Code
+reads the JAR from the same path on every session start. The update takes effect the
+next time you open a Claude Code session.
+
+### 7. Removing the server
+
+```bash
+claude mcp remove codex
 ```
 
 ---
@@ -403,7 +449,7 @@ src/main/kotlin/
 │   ├── OutputRedactor.kt            # Scrubs secrets from stdout/stderr; truncates output
 │   └── EnvironmentPolicy.kt         # Builds subprocess env from passthrough allowlist
 └── logging/
-    └── AuditLogger.kt               # Structured AUDIT lines — prompt hash only, never raw
+    └── AuditLogger.kt               # Structured JSON audit lines — outcome, metrics, prompt hash only, never raw
 ```
 
 ---

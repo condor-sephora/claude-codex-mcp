@@ -1,7 +1,5 @@
 package codex
 
-import config.AppConfig
-
 /**
  * Builds the argument list for the Codex subprocess.
  *
@@ -12,10 +10,10 @@ import config.AppConfig
  */
 object CodexCommand {
 
-    fun build(request: CodexExecutionRequest, config: AppConfig): List<String> =
+    fun build(request: CodexExecutionRequest): List<String> =
         listOf("codex", "exec", request.prompt)
 
-    fun preview(request: CodexExecutionRequest, config: AppConfig): String {
+    fun preview(request: CodexExecutionRequest): String {
         val safePrompt = "[prompt:${sha256Short(request.prompt)}...${request.prompt.length}chars]"
         return "codex exec $safePrompt"
     }
