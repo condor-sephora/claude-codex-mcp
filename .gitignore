@@ -1,0 +1,45 @@
+# Gradle
+.gradle/
+build/
+out/
+gradle-app.setting
+!gradle-wrapper.jar
+!gradle-wrapper.properties
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.classpath
+.project
+.settings/
+
+# Environment / secrets
+.env
+.env.*
+*.local
+
+# Logs
+*.log
+logs/
+audit-*.log
+
+# OS
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Kotlin / JVM
+*.class
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+
+# Local machine config (Android SDK path, etc. — machine-specific, never commit)
+local.properties
+
+# Codex session artifacts
+.codex/
+codex-session*.json
