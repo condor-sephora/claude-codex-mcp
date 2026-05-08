@@ -1,7 +1,11 @@
 package codex
 
 import mcp.McpServerProcess
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.*
@@ -15,8 +19,8 @@ import java.nio.file.Path
  * Each audit line is "AUDIT <json-object>" — one line per event.
  * Verifies that:
  *   - Audit log entries appear on stderr (captured from server stderr).
- *   - Raw prompt text does NOT appear in the audit log.
- *   - Prompt hash, length, outcome, and sessionId ARE logged.
+ *   - Raw prompt, stdout, stderr, outcome, and sessionId ARE logged.
+ *   - Environment variable values are NEVER logged.
  *   - Rejection events are logged with a rejectionCategory.
  */
 class AuditLoggingIntegrationTest {
@@ -26,6 +30,7 @@ class AuditLoggingIntegrationTest {
 
     private val jarPath: String by lazy { System.getProperty("mcp.jar.path") ?: error("mcp.jar.path not set") }
     private val fakeCodexPath: String by lazy { System.getProperty("fake.codex.path") ?: error("fake.codex.path not set") }
+    private val json = Json { ignoreUnknownKeys = true }
 
     private lateinit var server: McpServerProcess
 
@@ -33,7 +38,7 @@ class AuditLoggingIntegrationTest {
     fun tearDown() { server.close() }
 
     @Test
-    fun `audit log contains AUDIT prefix and metadata — not raw prompt`() {
+    fun `audit log contains prompt, metadata, and taskId`() {
         server = McpServerProcess(
             jarPath = jarPath,
             fakeCodexPath = fakeCodexPath,
@@ -42,9 +47,9 @@ class AuditLoggingIntegrationTest {
         server.start()
         server.client.initialize()
 
-        val sensitivePrompt = "this-is-the-raw-prompt-content-do-not-log"
+        val prompt = "list kotlin files in the project"
         server.client.callTool("execute_codex", buildJsonObject {
-            put("prompt", sensitivePrompt)
+            put("prompt", prompt)
             put("cwd", tempDir.toFile().canonicalPath)
             put("taskId", "AUDIT-TEST-001")
         })
@@ -56,20 +61,21 @@ class AuditLoggingIntegrationTest {
         assertTrue(auditLines.isNotEmpty(), "At least one AUDIT line expected.\nAll stderr:\n${stderr.joinToString("\n")}")
 
         val auditLine = auditLines.first { it.contains("\"event\":\"codex_invocation\"") }
+        val auditJson = json.parseToJsonElement(auditLine.removePrefix("AUDIT ")).jsonObject
 
-        // Must contain outcome, prompt hash, length, and sessionId
+        // Core metadata fields
         assertTrue(auditLine.contains("\"outcome\":"), "Audit line must contain outcome")
         assertTrue(auditLine.contains("\"promptHash\":"), "Audit line must contain promptHash")
         assertTrue(auditLine.contains("\"promptLength\":"), "Audit line must contain promptLength")
         assertTrue(auditLine.contains("\"sessionId\":"), "Audit line must contain sessionId")
-        assertTrue(auditLine.contains("\"stderrNonEmpty\":"), "Audit line must contain stderrNonEmpty")
-
-        // Must NOT contain the raw prompt
-        assertFalse(auditLine.contains(sensitivePrompt),
-            "Raw prompt must not appear in audit log.\nAudit line: $auditLine")
-
-        // Must contain task ID
         assertTrue(auditLine.contains("AUDIT-TEST-001"), "Audit line must contain taskId")
+
+        // Raw prompt must be present
+        assertEquals(
+            prompt,
+            auditJson["prompt"]?.jsonPrimitive?.contentOrNull,
+            "Audit line must contain the raw prompt in the 'prompt' field",
+        )
     }
 
     @Test
@@ -142,6 +148,32 @@ class AuditLoggingIntegrationTest {
             "Expected security_rejection audit event.\nAll stderr:\n${stderr.joinToString("\n")}")
         assertTrue(rejectionLines.first().contains("\"rejectionCategory\":\"empty_prompt\""),
             "Empty prompt rejection should be categorized as empty_prompt")
+    }
+
+    @Test
+    fun `audit log contains codex stdout and stderr output`() {
+        server = McpServerProcess(
+            jarPath = jarPath,
+            fakeCodexPath = fakeCodexPath,
+            extraEnv = mapOf("FAKE_CODEX_MODE" to "stderr"),
+        )
+        server.start()
+        server.client.initialize()
+
+        server.client.callTool("execute_codex", buildJsonObject {
+            put("prompt", "run analysis")
+            put("cwd", tempDir.toFile().canonicalPath)
+        })
+
+        Thread.sleep(500)
+        val auditLine = server.getStderr()
+            .filter { it.startsWith("AUDIT") }
+            .first { it.contains("\"event\":\"codex_invocation\"") }
+
+        assertTrue(auditLine.contains("\"stdout\":"), "Audit line must contain stdout field")
+        assertTrue(auditLine.contains("\"stderr\":"), "Audit line must contain stderr field")
+        assertTrue(auditLine.contains("stdout output from codex"), "Audit stdout must contain codex output")
+        assertTrue(auditLine.contains("stderr warning from codex"), "Audit stderr must contain codex stderr")
     }
 
     @Test

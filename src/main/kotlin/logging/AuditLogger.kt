@@ -14,12 +14,16 @@ import java.util.UUID
  * Writes a structured JSON Lines audit entry for every tool invocation.
  *
  * Security invariants:
- *   - Raw prompts are NEVER written — only a SHA-256 hash prefix and length.
  *   - Environment variable values are NEVER written.
  *   - All output goes to stderr (or a configured file) — NEVER to stdout.
  *
  * Each line is prefixed with "AUDIT " followed by a single JSON object so the file
  * can be grepped, streamed, and fed directly to Claude or Codex for pattern analysis.
+ *
+ * Each invocation entry includes:
+ *   - "prompt"  — the raw instruction sent to Codex
+ *   - "stdout"  — the bounded, redacted output Codex produced
+ *   - "stderr"  — the bounded, redacted stderr Codex produced
  */
 object AuditLogger {
 
@@ -55,6 +59,7 @@ object AuditLogger {
             put("durationMs", result.durationMs)
             put("sandbox", request.sandbox.value)
             put("cwd", sanitizeForLog(request.cwd))
+            put("prompt", request.prompt)
             put("promptHash", sha256Short(request.prompt))
             put("promptLength", request.prompt.length)
             put("timeoutMs", request.timeoutMs)
@@ -63,6 +68,8 @@ object AuditLogger {
             put("stdoutTruncated", result.stdoutTruncated)
             put("stderrTruncated", result.stderrTruncated)
             put("stderrNonEmpty", result.stderr.isNotBlank())
+            put("stdout", result.stdout)
+            put("stderr", result.stderr)
         }
         out.println("AUDIT $entry")
     }

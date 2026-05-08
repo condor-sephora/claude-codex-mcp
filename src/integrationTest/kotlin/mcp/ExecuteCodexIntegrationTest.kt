@@ -108,6 +108,28 @@ class ExecuteCodexIntegrationTest {
     }
 
     @Test
+    fun `successful execution sets isError to false`() {
+        startServer(mapOf("FAKE_CODEX_MODE" to "success"))
+        val response = server.client.callTool("execute_codex", buildJsonObject {
+            put("prompt", "list kotlin files")
+            put("cwd", tempDir.toFile().canonicalPath)
+        })
+        val isError = response["result"]?.jsonObject?.get("isError")?.jsonPrimitive?.boolean
+        assertFalse(isError == true, "Successful execution must not set isError=true")
+    }
+
+    @Test
+    fun `non-zero exit code sets isError to true`() {
+        startServer(mapOf("FAKE_CODEX_MODE" to "error"))
+        val response = server.client.callTool("execute_codex", buildJsonObject {
+            put("prompt", "cause an error")
+            put("cwd", tempDir.toFile().canonicalPath)
+        })
+        val isError = response["result"]?.jsonObject?.get("isError")?.jsonPrimitive?.boolean
+        assertTrue(isError == true, "Non-zero exit code must set isError=true")
+    }
+
+    @Test
     fun `stderr output is captured`() {
         startServer(mapOf("FAKE_CODEX_MODE" to "stderr"))
         val result = callTool(mapOf(

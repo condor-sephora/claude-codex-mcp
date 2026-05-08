@@ -70,7 +70,7 @@ object ExecuteCodexTool {
 
                 return CallToolResult(
                     content = listOf(TextContent(text = json.encodeToString(result))),
-                    isError = false,
+                    isError = result.timedOut || result.exitCode != 0,
                 )
             }
         }
