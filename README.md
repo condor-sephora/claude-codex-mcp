@@ -9,6 +9,19 @@ Codex — with environment isolation, secret redaction, output bounding, and ful
 
 ---
 
+## Tools
+
+This server exposes two MCP tools:
+
+| Tool | Purpose | Sandbox |
+|---|---|---|
+| `execute_codex` | General-purpose Codex delegation. Claude passes a prompt string; Codex executes it. | Configurable (`read-only` default) |
+| `code_intake` | Structured read-only codebase verification. Claude writes a request file; Codex reads it and returns a structured verification report. | Always `read-only` |
+
+See [docs/intake-mode.md](docs/intake-mode.md) for the full intake mode reference.
+
+---
+
 ## How it works
 
 ```
@@ -203,10 +216,70 @@ Set these via `--env` flags in the `claude mcp add` command (see Installation ab
 | `CODEX_MCP_ALLOW_DANGER_FULL_ACCESS` | `false` | Set `true` to enable `danger-full-access` sandbox mode. In this mode Codex auto-approves all its own internal actions (file writes, command execution) without prompting. Use only when `workspace-write` is insufficient — for example when Codex needs to operate outside the project directory. See **Delegation model and limitations** below. |
 | `CODEX_MCP_ENV_PASSTHROUGH_ALLOWLIST` | `PATH,HOME,USER,LOGNAME,SHELL,OPENAI_API_KEY,CODEX_HOME` | Controls which environment variables are forwarded into the Codex subprocess. When the server spawns `codex exec` it **clears the subprocess environment completely** first, then copies in only the variables listed here. This is a deliberate security measure: a developer's local machine typically holds the most sensitive credentials (AWS keys, database passwords, GitHub tokens, corporate SSO tokens), and without this control every Codex subprocess would inherit all of them. If Codex is ever tricked into dumping its environment via prompt injection in untrusted code or documents, only the allowlisted variables are exposed — your production credentials were never there to leak. The output redactor adds a second layer by scrubbing known secret patterns from stdout/stderr, but the allowlist is the stronger control because it prevents secrets from entering the subprocess at all. If a task legitimately needs an additional variable (e.g. `GITHUB_TOKEN` to push commits), add it explicitly — but note that setting this variable **replaces** the entire default list, so include the defaults too. |
 | `CODEX_MCP_AUDIT_LOG_PATH` | stderr | File path for the structured audit log. Each line is `AUDIT <json>` — one JSON object per event, appended in real time. When not set, audit lines go to stderr. Set this to a file when you want to feed the log to Claude or Codex for pattern analysis. See **Audit log format** below. |
+| `CODEX_MCP_ALLOWED_ROOTS` | *(empty)* | Colon-separated list of canonical absolute paths. When set, every `cwd` argument (for both tools) must be inside one of these roots. Unset means no restriction — both tools accept any existing directory, which is the historical behavior. Example: `CODEX_MCP_ALLOWED_ROOTS=/home/me/projects:/workspace` |
+| `CODEX_MCP_MAX_REQUEST_FILE_BYTES` | `204800` | (`code_intake` only) Maximum size in bytes of an intake request file. Default 200 KB. |
+| `CODEX_MCP_MAX_EXTRA_INSTRUCTIONS_CHARS` | `4000` | (`code_intake` only) Maximum length of the `extraInstructions` field. |
+| `CODEX_MCP_DEFAULT_TIMEOUT_MS` | `900000` | (`code_intake` only) Default wall-clock timeout (ms) when the caller omits `timeoutMs`. Intake calls run longer than typical Codex tasks — default is 15 minutes. |
+| `CODEX_MCP_MAX_TIMEOUT_MS` | `1800000` | (`code_intake` only) Hard upper bound (ms) for any intake call's `timeoutMs`. Default 30 minutes. |
 
 > **Security note on env passthrough** — The subprocess environment is rebuilt from scratch
 > on every call. Only variables explicitly listed in `CODEX_MCP_ENV_PASSTHROUGH_ALLOWLIST`
 > are forwarded. The Codex process never sees session tokens or any other MCP server internals.
+
+---
+
+## Tool schema: `code_intake`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `requestFile` | string | **yes** | Path to the intake request file, relative to `cwd`. Allowed extensions: `.md`, `.txt`, `.yaml`, `.yml`, `.json`. Max `CODEX_MCP_MAX_REQUEST_FILE_BYTES` (default 200 KB). |
+| `cwd` | string | no | Repository root for Codex to inspect. Defaults to server CWD. Must be inside `CODEX_MCP_ALLOWED_ROOTS` when configured. |
+| `outputFormat` | enum | no | `yaml` (default), `json`, `markdown` |
+| `timeoutMs` | number | no | Per-call timeout in ms. Clamped to [5000, `CODEX_MCP_MAX_TIMEOUT_MS`]. Defaults to `CODEX_MCP_DEFAULT_TIMEOUT_MS` (900 000 ms). |
+| `extraInstructions` | string | no | Optional additional instructions appended to the generated intake prompt. Max `CODEX_MCP_MAX_EXTRA_INSTRUCTIONS_CHARS` (default 4 000). |
+| `sandbox` | enum | no | Must be `read-only` or omitted. Any other value is rejected. |
+| `taskId` | string | no | Caller-provided traceability label. Max 128 printable ASCII chars. Echoed in the result and audit log. |
+
+**Intake mode security**: the sandbox is always forced to `read-only`. Passing `workspace-write` or `danger-full-access` returns an error before any subprocess is started.
+
+**What Claude writes into the request file, what Codex can read**: The MCP never reads the request file contents. Only the validated path is passed to Codex in the prompt. Codex reads the file from disk inside its read-only sandbox.
+
+**Request file template**: See [docs/templates/intake-request.md](docs/templates/intake-request.md).
+
+**Full intake mode reference**: See [docs/intake-mode.md](docs/intake-mode.md).
+
+### Intake mode result shape
+
+```json
+{
+  "mode": "intake",
+  "exitCode": 0,
+  "timedOut": false,
+  "durationMs": 34210,
+  "stdout": "task_understanding:\n  summary: ...",
+  "stderr": "",
+  "stdoutTruncated": false,
+  "stderrTruncated": false,
+  "commandPreview": "codex exec [prompt:a1b2c3d4...412chars]",
+  "workingDirectory": "/path/to/repo",
+  "requestFile": ".agent-intake/TASK-123/intake-request.md",
+  "outputFormat": "yaml",
+  "sandbox": "read-only",
+  "taskId": "TASK-123"
+}
+```
+
+### Intake mode example call
+
+```json
+{
+  "requestFile": ".agent-intake/TASK-123/intake-request.md",
+  "cwd": "/path/to/repository",
+  "outputFormat": "yaml",
+  "timeoutMs": 900000,
+  "taskId": "TASK-123"
+}
+```
 
 ---
 
@@ -431,25 +504,33 @@ CODEX_MCP_RUN_REAL_CODEX_TESTS=true ./gradlew realCodexSmokeTest
 src/main/kotlin/
 ├── Main.kt                          # Entry point — wires transport and starts server
 ├── mcp/
-│   ├── CodexMcpServer.kt            # Builds the MCP Server instance
+│   ├── CodexMcpServer.kt            # Builds the MCP Server instance (registers both tools)
 │   ├── ExecuteCodexTool.kt          # Registers execute_codex, parses args, calls SecurityPolicy
-│   └── ToolSchemas.kt               # JSON Schema definition for the tool input
+│   ├── CodeIntakeTool.kt            # Registers code_intake, calls IntakeSecurityPolicy
+│   └── ToolSchemas.kt               # JSON Schema definitions for both tool inputs
 ├── codex/
 │   ├── CodexCommand.kt              # Builds the subprocess argument list (no shell)
 │   ├── CodexExecutor.kt             # Spawns subprocess, enforces timeout, bounds output
 │   ├── CodexResult.kt               # Serializable result returned to the caller
 │   ├── CodexExecutionRequest.kt     # Validated request passed between layers
 │   └── SandboxMode.kt               # Enum: read-only / workspace-write / danger-full-access
+├── intake/
+│   ├── IntakeRequest.kt             # Validated intake request (cwd, requestFile, format, etc.)
+│   ├── IntakeResult.kt              # Serializable intake result with mode="intake" and file metadata
+│   ├── IntakeOutputFormat.kt        # Enum: yaml / json / markdown
+│   └── IntakePromptBuilder.kt       # Builds the generic Codex prompt from an IntakeRequest
 ├── config/
-│   ├── AppConfig.kt                 # Immutable config data class
+│   ├── AppConfig.kt                 # Immutable config data class (includes intake fields)
 │   └── EnvConfigLoader.kt           # Parses all CODEX_MCP_* env vars at startup
 ├── security/
-│   ├── SecurityPolicy.kt            # Orchestrates all checks; returns Approved or Rejected
+│   ├── SecurityPolicy.kt            # execute_codex policy: prompt, sandbox, cwd, taskId
+│   ├── IntakeSecurityPolicy.kt      # code_intake policy: sandbox lock, path, format, extras
+│   ├── PathPolicy.kt                # Shared cwd and requestFile path validation
 │   ├── InputValidator.kt            # Prompt length, dangerous patterns, taskId validation
 │   ├── OutputRedactor.kt            # Scrubs secrets from stdout/stderr; truncates output
 │   └── EnvironmentPolicy.kt         # Builds subprocess env from passthrough allowlist
 └── logging/
-    └── AuditLogger.kt               # Structured JSON audit lines — outcome, metrics, prompt hash only, never raw
+    └── AuditLogger.kt               # Structured JSON audit lines for both tools
 ```
 
 ---

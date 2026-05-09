@@ -18,11 +18,14 @@ user's local machine. The primary threats are:
 
 ## Security controls
 
-### 1. Working directory validation (`security/SecurityPolicy.kt`)
+### 1. Working directory validation
 
-- `cwd` is canonicalized and must exist as a directory.
-- No allowed-root restriction is enforced — `cwd` only sets the subprocess starting directory,
-  not what paths Codex may read. OS user permissions govern actual file access.
+`execute_codex` — `cwd` is canonicalized and must exist as a directory
+(`security/SecurityPolicy.kt`). No allowed-root restriction is enforced by default —
+`cwd` only sets the subprocess starting directory. OS user permissions govern actual file access.
+
+`code_intake` — additionally validates allowed roots when `CODEX_MCP_ALLOWED_ROOTS` is set
+(`security/PathPolicy.kt`).
 
 ### 2. Prompt heuristics (`security/InputValidator.kt`)
 
@@ -86,6 +89,15 @@ stderr (or a configured file). The line contains:
 
 Prompts exceeding `CODEX_MCP_MAX_PROMPT_CHARS` (default 8 000) are rejected before any
 subprocess is spawned.
+
+### 11. Intake mode — additional controls (`code_intake` tool)
+
+- Sandbox is **forced to `read-only`**. Passing `workspace-write` or `danger-full-access` is rejected.
+- `requestFile` must be relative, must resolve inside `cwd` after canonicalization (defeats `../` escapes), must have an allowed extension (`.md`, `.txt`, `.yaml`, `.yml`, `.json`), must be ≤ `CODEX_MCP_MAX_REQUEST_FILE_BYTES`, must not be binary, and must not match a sensitive filename pattern.
+- MCP server **never reads** the request file contents — only the validated path is passed to Codex.
+- `--sandbox read-only` flag is passed explicitly to `codex exec`.
+- `extraInstructions` is bounded by `CODEX_MCP_MAX_EXTRA_INSTRUCTIONS_CHARS`.
+- Audit entries use `event: intake_invocation` / `intake_rejection` and record the file path (not contents).
 
 ## What this server does NOT protect against
 

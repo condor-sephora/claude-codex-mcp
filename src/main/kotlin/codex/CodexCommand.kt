@@ -10,8 +10,18 @@ package codex
  */
 object CodexCommand {
 
-    fun build(request: CodexExecutionRequest): List<String> =
-        listOf("codex", "exec", request.prompt)
+    /**
+     * Builds `codex exec [--sandbox <mode>] <prompt>`.
+     *
+     * The optional sandbox flag is opt-in to preserve the historical command shape used
+     * by the `execute_codex` tool (which passes only the prompt). Intake mode passes
+     * `includeSandboxFlag = true` so Codex enforces the read-only restriction at the
+     * CLI level in addition to the in-process policy.
+     */
+    fun build(request: CodexExecutionRequest, includeSandboxFlag: Boolean = false): List<String> {
+        if (!includeSandboxFlag) return listOf("codex", "exec", request.prompt)
+        return listOf("codex", "exec", "--sandbox", request.sandbox.value, request.prompt)
+    }
 
     fun preview(request: CodexExecutionRequest): String {
         val safePrompt = "[prompt:${sha256Short(request.prompt)}...${request.prompt.length}chars]"

@@ -38,6 +38,7 @@ object CodexMcpServer {
         )
 
         ExecuteCodexTool.register(server, config)
+        CodeIntakeTool.register(server, config)
 
         return server
     }

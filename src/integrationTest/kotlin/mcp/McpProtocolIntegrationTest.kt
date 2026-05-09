@@ -61,31 +61,45 @@ class McpProtocolIntegrationTest {
     }
 
     @Test
-    fun `tool listing returns exactly one tool`() {
+    fun `tool listing returns exactly two tools`() {
         server.client.initialize()
         val response = server.client.listTools()
         val tools = response["result"]!!.jsonObject["tools"]!!.jsonArray
-        assertEquals(1, tools.size, "Expected exactly one tool, got: ${tools.map { it.jsonObject["name"] }}")
+        assertEquals(2, tools.size, "Expected exactly two tools, got: ${tools.map { it.jsonObject["name"] }}")
     }
 
     @Test
-    fun `tool name is exactly execute_codex`() {
+    fun `tool names include execute_codex and code_intake`() {
         server.client.initialize()
         val response = server.client.listTools()
         val tools = response["result"]!!.jsonObject["tools"]!!.jsonArray
-        val toolName = tools.first().jsonObject["name"]!!.jsonPrimitive.contentOrNull
-        assertEquals("execute_codex", toolName)
+        val names = tools.mapNotNull { it.jsonObject["name"]?.jsonPrimitive?.contentOrNull }.toSet()
+        assertTrue(names.contains("execute_codex"), "execute_codex must be registered")
+        assertTrue(names.contains("code_intake"), "code_intake must be registered")
     }
 
     @Test
-    fun `tool schema includes expected required field prompt`() {
+    fun `execute_codex schema requires prompt`() {
         server.client.initialize()
         val response = server.client.listTools()
-        val tool = response["result"]!!.jsonObject["tools"]!!.jsonArray.first().jsonObject
-        val inputSchema = tool["inputSchema"]!!.jsonObject
-        val required = inputSchema["required"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull }
-        assertNotNull(required, "required array must be present in inputSchema")
-        assertTrue(required!!.contains("prompt"), "prompt must be a required field")
+        val tools = response["result"]!!.jsonObject["tools"]!!.jsonArray
+        val executeTool = tools.first { it.jsonObject["name"]?.jsonPrimitive?.contentOrNull == "execute_codex" }.jsonObject
+        val required = executeTool["inputSchema"]!!.jsonObject["required"]?.jsonArray
+            ?.mapNotNull { it.jsonPrimitive.contentOrNull }
+        assertNotNull(required, "required array must be present in execute_codex schema")
+        assertTrue(required!!.contains("prompt"), "prompt must be required in execute_codex")
+    }
+
+    @Test
+    fun `code_intake schema requires requestFile`() {
+        server.client.initialize()
+        val response = server.client.listTools()
+        val tools = response["result"]!!.jsonObject["tools"]!!.jsonArray
+        val intakeTool = tools.first { it.jsonObject["name"]?.jsonPrimitive?.contentOrNull == "code_intake" }.jsonObject
+        val required = intakeTool["inputSchema"]!!.jsonObject["required"]?.jsonArray
+            ?.mapNotNull { it.jsonPrimitive.contentOrNull }
+        assertNotNull(required, "required array must be present in code_intake schema")
+        assertTrue(required!!.contains("requestFile"), "requestFile must be required in code_intake")
     }
 
     @Test

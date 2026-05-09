@@ -149,4 +149,9 @@ internal fun testConfig(): AppConfig = AppConfig(
     allowDangerFullAccess = false,
     envPassthroughAllowlist = setOf("PATH", "HOME"),
     auditLogPath = null,
+    allowedRoots = emptyList(),
+    maxRequestFileBytes = 200L * 1024L,
+    maxExtraInstructionsChars = 4_000,
+    defaultIntakeTimeoutMs = 900_000L,
+    maxIntakeTimeoutMs = 1_800_000L,
 )

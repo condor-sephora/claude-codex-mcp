@@ -20,8 +20,12 @@ import java.util.concurrent.TimeUnit
  */
 object CodexExecutor {
 
-    fun execute(request: CodexExecutionRequest, config: AppConfig): CodexResult {
-        val command = CodexCommand.build(request)
+    fun execute(
+        request: CodexExecutionRequest,
+        config: AppConfig,
+        includeSandboxFlag: Boolean = false,
+    ): CodexResult {
+        val command = CodexCommand.build(request, includeSandboxFlag)
         val env = EnvironmentPolicy.buildEnv(config)
         val workingDir = File(request.cwd)
         val commandPreview = CodexCommand.preview(request)

@@ -72,4 +72,56 @@ class EnvConfigLoaderTest {
             EnvConfigLoader.load(mapOf("CODEX_MCP_TIMEOUT_MS" to "0"))
         }
     }
+
+    // ---------- Intake config ----------
+
+    @Test
+    fun `intake defaults when env is empty`() {
+        val config = EnvConfigLoader.load(emptyMap())
+        assertTrue(config.allowedRoots.isEmpty(), "allowedRoots should be empty by default")
+        assertEquals(200L * 1024L, config.maxRequestFileBytes)
+        assertEquals(4_000, config.maxExtraInstructionsChars)
+        assertEquals(900_000L, config.defaultIntakeTimeoutMs)
+        assertEquals(1_800_000L, config.maxIntakeTimeoutMs)
+    }
+
+    @Test
+    fun `reads CODEX_MCP_MAX_REQUEST_FILE_BYTES`() {
+        val config = EnvConfigLoader.load(mapOf("CODEX_MCP_MAX_REQUEST_FILE_BYTES" to "51200"))
+        assertEquals(51200L, config.maxRequestFileBytes)
+    }
+
+    @Test
+    fun `reads CODEX_MCP_MAX_EXTRA_INSTRUCTIONS_CHARS`() {
+        val config = EnvConfigLoader.load(mapOf("CODEX_MCP_MAX_EXTRA_INSTRUCTIONS_CHARS" to "1000"))
+        assertEquals(1000, config.maxExtraInstructionsChars)
+    }
+
+    @Test
+    fun `reads CODEX_MCP_DEFAULT_TIMEOUT_MS for intake`() {
+        val config = EnvConfigLoader.load(mapOf(
+            "CODEX_MCP_DEFAULT_TIMEOUT_MS" to "600000",
+            "CODEX_MCP_MAX_TIMEOUT_MS" to "1800000",
+        ))
+        assertEquals(600_000L, config.defaultIntakeTimeoutMs)
+    }
+
+    @Test
+    fun `reads CODEX_MCP_MAX_TIMEOUT_MS for intake`() {
+        val config = EnvConfigLoader.load(mapOf(
+            "CODEX_MCP_DEFAULT_TIMEOUT_MS" to "300000",
+            "CODEX_MCP_MAX_TIMEOUT_MS" to "600000",
+        ))
+        assertEquals(600_000L, config.maxIntakeTimeoutMs)
+    }
+
+    @Test
+    fun `fails when max timeout is less than default intake timeout`() {
+        assertThrows(Exception::class.java) {
+            EnvConfigLoader.load(mapOf(
+                "CODEX_MCP_DEFAULT_TIMEOUT_MS" to "900000",
+                "CODEX_MCP_MAX_TIMEOUT_MS" to "300000",
+            ))
+        }
+    }
 }
